@@ -577,8 +577,8 @@ def process_images(input_dir: str, output_dir: str, max_images: int = None):
 
 
 if __name__ == "__main__":
-    input_dir = "output/debug/s3_preprocessing"
-    output_dir = "output/combined_test"
+    input_dir = "Input"
+    output_dir = "Output"
     
     if len(sys.argv) > 1:
         input_dir = sys.argv[1]
