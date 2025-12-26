@@ -1,36 +1,38 @@
 """
-Test Combined: Bộ Lọc + Bộ Chuẩn Hóa
-=====================================
+Filter v2: Bộ Lọc Chất Lượng Ảnh Label
+======================================
 
-Flow:
-  Ảnh → BỘ LỌC (S3b) 
-           │
-           ├── GOOD     → Không xử lý → S5 QR
-           ├── FIXABLE  → BỘ CHUẨN HÓA (S4) → S5 QR  
-           └── DISCARD  → Bỏ
-
-Output:
-  output/combined_test/
-  ├── 1_discard/           - Ảnh bỏ (quá kém)
-  ├── 2_fixable/
-  │   ├── before/          - Ảnh trước normalize
-  │   ├── after/           - Ảnh sau normalize
-  │   ├── detected/        - Normalize + QR OK
-  │   └── not_detected/    - Normalize + QR fail
-  └── 3_good/
-      ├── detected/        - Không cần xử lý + QR OK
-      └── not_detected/    - Không cần xử lý + QR fail
+Chức năng:
+  - Lọc ảnh theo 4 tiêu chí: size, contrast, sharpness, brightness
+  - [Option] Chuẩn hóa ảnh FIXABLE về mức target
+  - [Option] Phát hiện QR Code
+  - [Option] Nhận dạng chữ (OCR)
 
 Usage:
-    cd YOLO11-Seg-Label-Detector
-    source .venv/bin/activate
-    python scripts/test_combined.py
+  # Chỉ lọc (mặc định)
+  python test_combined.py
+  
+  # Lọc + Chuẩn hóa ảnh FIXABLE
+  python test_combined.py --normalize
+  
+  # Lọc + QR Detection
+  python test_combined.py --qr
+  
+  # Lọc + Chuẩn hóa + QR + OCR (đầy đủ)
+  python test_combined.py --normalize --qr --ocr
+
+Output:
+  Output/
+  ├── 1_discard/     - Ảnh bị loại
+  ├── 2_fixable/     - Ảnh cần xử lý (hoặc đã xử lý nếu --normalize)
+  └── 3_good/        - Ảnh tốt
 """
 
 import os
 import sys
 import shutil
 import json
+import argparse
 from dataclasses import dataclass, asdict
 from enum import Enum
 from typing import Tuple, Optional
@@ -341,38 +343,66 @@ def save_image_info(folder: str, filename: str, info: dict):
 # ==============================================================================
 # MAIN PROCESSING
 # ==============================================================================
-def process_images(input_dir: str, output_dir: str, max_images: int = None):
-    # Tạo thư mục (giống smart_filter_test)
-    dirs = {
-        "discard": os.path.join(output_dir, "1_discard"),
-        "fixable_detected": os.path.join(output_dir, "2_fixable", "detected"),
-        "fixable_not_detected": os.path.join(output_dir, "2_fixable", "not_detected"),
-        "good_detected": os.path.join(output_dir, "3_good", "detected"),
-        "good_not_detected": os.path.join(output_dir, "3_good", "not_detected"),
-    }
+def process_images(input_dir: str, output_dir: str, 
+                   enable_normalize: bool = False,
+                   enable_qr: bool = False,
+                   enable_ocr: bool = False,
+                   max_images: int = None):
+    """
+    Xử lý ảnh với các option.
+    
+    Args:
+        input_dir: Thư mục chứa ảnh đầu vào
+        output_dir: Thư mục lưu kết quả
+        enable_normalize: Bật chuẩn hóa ảnh FIXABLE
+        enable_qr: Bật phát hiện QR Code
+        enable_ocr: Bật nhận dạng chữ (OCR)
+        max_images: Giới hạn số ảnh xử lý (None = tất cả)
+    """
+    # Tạo thư mục output
+    if enable_qr:
+        # Nếu bật QR, chia thành detected/not_detected
+        dirs = {
+            "discard": os.path.join(output_dir, "1_discard"),
+            "fixable_detected": os.path.join(output_dir, "2_fixable", "detected"),
+            "fixable_not_detected": os.path.join(output_dir, "2_fixable", "not_detected"),
+            "good_detected": os.path.join(output_dir, "3_good", "detected"),
+            "good_not_detected": os.path.join(output_dir, "3_good", "not_detected"),
+        }
+    else:
+        # Chỉ lọc, không cần chia detected/not_detected
+        dirs = {
+            "discard": os.path.join(output_dir, "1_discard"),
+            "fixable": os.path.join(output_dir, "2_fixable"),
+            "good": os.path.join(output_dir, "3_good"),
+        }
     
     for d in dirs.values():
         os.makedirs(d, exist_ok=True)
     
-    image_files = [f for f in os.listdir(input_dir) if f.endswith('.png')]
+    image_files = [f for f in os.listdir(input_dir) if f.lower().endswith(('.png', '.jpg', '.jpeg'))]
     if max_images:
         image_files = image_files[:max_images]
     
+    # Header
     print("=" * 70)
-    print("🔧 TEST COMBINED: BỘ LỌC + BỘ CHUẨN HÓA")
+    print("🔍 FILTER v2: BỘ LỌC CHẤT LƯỢNG ẢNH")
     print("=" * 70)
-    print("Flow:")
-    print("  Ảnh → S3b LỌC → GOOD     → Không xử lý → S5 QR")
-    print("                → FIXABLE  → S4 NORMALIZE → S5 QR")
-    print("                → DISCARD  → Bỏ")
-    print("=" * 70)
-    print(f"Input:  {input_dir}")
-    print(f"Output: {output_dir}")
-    print(f"Images: {len(image_files)}")
+    print(f"📂 Input:  {input_dir}")
+    print(f"📂 Output: {output_dir}")
+    print(f"📷 Images: {len(image_files)}")
+    print(f"")
+    print(f"⚙️  Options:")
+    print(f"   Normalize: {'✅ ON' if enable_normalize else '❌ OFF'}")
+    print(f"   QR Detect: {'✅ ON' if enable_qr else '❌ OFF'}")
+    print(f"   OCR:       {'✅ ON' if enable_ocr else '❌ OFF'}")
     print("=" * 70)
     
     stats = {
         "discard": 0,
+        "good": 0,
+        "fixable": 0,
+        # Chi tiết khi bật QR
         "good_detected": 0,
         "good_not_detected": 0,
         "fixable_detected": 0,
@@ -394,13 +424,20 @@ def process_images(input_dir: str, output_dir: str, max_images: int = None):
         metrics = calculate_metrics(image)
         outcome, discard_reason, needs_fix = filter_image(metrics)
         
+        # Khởi tạo biến
+        qr_ok = None
+        qr_text = None
+        ocr_ok = None
+        ocr_texts = []
+        final_image = image
+        fixes = [k for k, v in needs_fix.items() if v]
+        
         if outcome == QualityOutcome.DISCARD:
             # Bỏ ảnh
             dest_folder = dirs["discard"]
             shutil.copy(filepath, os.path.join(dest_folder, filename))
             stats["discard"] += 1
             status = f"❌ DISCARD: {discard_reason}"
-            qr_ok = False
             
             # Lưu info
             save_image_info(dest_folder, filename, {
@@ -412,115 +449,121 @@ def process_images(input_dir: str, output_dir: str, max_images: int = None):
             })
             
         elif outcome == QualityOutcome.GOOD:
-            # Không cần xử lý, detect QR trực tiếp
-            qr_ok, qr_text = detect_qr(image)
-            ocr_ok, ocr_texts = detect_ocr(image)
+            stats["good"] += 1
             
-            if ocr_ok:
-                stats["ocr_success"] += 1
-            else:
-                stats["ocr_fail"] += 1
+            # QR Detection (nếu bật)
+            if enable_qr:
+                qr_ok, qr_text = detect_qr(image)
             
-            if qr_ok:
-                dest_folder = dirs["good_detected"]
-                shutil.copy(filepath, os.path.join(dest_folder, filename))
-                stats["good_detected"] += 1
-                status = f"✅ GOOD → QR ✓ | OCR {'✓' if ocr_ok else '✗'}"
-                
-                # Lưu info
-                save_image_info(dest_folder, filename, {
-                    "filename": filename,
-                    "outcome": "good",
-                    "qr_detected": True,
-                    "qr_text": qr_text,
-                    "ocr_detected": ocr_ok,
-                    "ocr_texts": ocr_texts,
-                    "metrics": asdict(metrics),
-                    "processing": "none"
-                })
+            # OCR (nếu bật)
+            if enable_ocr:
+                ocr_ok, ocr_texts = detect_ocr(image)
+                if ocr_ok:
+                    stats["ocr_success"] += 1
+                else:
+                    stats["ocr_fail"] += 1
+            
+            # Lưu ảnh
+            if enable_qr:
+                if qr_ok:
+                    dest_folder = dirs["good_detected"]
+                    stats["good_detected"] += 1
+                    status = f"✅ GOOD → QR ✓"
+                else:
+                    dest_folder = dirs["good_not_detected"]
+                    stats["good_not_detected"] += 1
+                    status = f"✅ GOOD → QR ✗"
+                if enable_ocr:
+                    status += f" | OCR {'✓' if ocr_ok else '✗'}"
             else:
-                dest_folder = dirs["good_not_detected"]
-                shutil.copy(filepath, os.path.join(dest_folder, filename))
-                stats["good_not_detected"] += 1
-                status = f"✅ GOOD → QR ✗ | OCR {'✓' if ocr_ok else '✗'}"
-                
-                # Lưu info - lý do không detect được
-                save_image_info(dest_folder, filename, {
-                    "filename": filename,
-                    "outcome": "good",
-                    "qr_detected": False,
-                    "qr_fail_reason": "QR code not found or unreadable in image",
-                    "ocr_detected": ocr_ok,
-                    "ocr_texts": ocr_texts,
-                    "metrics": asdict(metrics),
-                    "processing": "none",
-                    "suggestion": "Check if QR code is present, visible, and not damaged"
-                })
+                dest_folder = dirs["good"]
+                status = f"✅ GOOD"
+                if enable_ocr:
+                    status += f" | OCR {'✓' if ocr_ok else '✗'}"
+            
+            shutil.copy(filepath, os.path.join(dest_folder, filename))
+            
+            # Lưu info
+            info = {
+                "filename": filename,
+                "outcome": "good",
+                "metrics": asdict(metrics),
+                "processing": "none"
+            }
+            if enable_qr:
+                info["qr_detected"] = qr_ok
+                info["qr_text"] = qr_text
+            if enable_ocr:
+                info["ocr_detected"] = ocr_ok
+                info["ocr_texts"] = ocr_texts
+            save_image_info(dest_folder, filename, info)
                 
         else:  # FIXABLE
-            # Tính metrics trước khi fix
+            stats["fixable"] += 1
             before_metrics = metrics
             
-            # Normalize CHỈ những gì cần fix
-            normalized = normalize_image(image, needs_fix)
-            
-            # Tính metrics sau khi fix
-            after_metrics = calculate_metrics(normalized)
-            
-            # Detect QR + OCR
-            qr_ok, qr_text = detect_qr(normalized)
-            ocr_ok, ocr_texts = detect_ocr(normalized)
-            
-            if ocr_ok:
-                stats["ocr_success"] += 1
+            # Normalize (nếu bật)
+            if enable_normalize:
+                final_image = normalize_image(image, needs_fix)
+                after_metrics = calculate_metrics(final_image)
             else:
-                stats["ocr_fail"] += 1
+                final_image = image
+                after_metrics = metrics
             
-            fixes = [k for k, v in needs_fix.items() if v]
+            # QR Detection (nếu bật)
+            if enable_qr:
+                qr_ok, qr_text = detect_qr(final_image)
             
-            if qr_ok:
-                dest_folder = dirs["fixable_detected"]
-                cv2.imwrite(os.path.join(dest_folder, filename), normalized)
-                stats["fixable_detected"] += 1
-                status = f"🔧 FIXABLE ({', '.join(fixes)}) → QR ✓ | OCR {'✓' if ocr_ok else '✗'}"
-                
-                # Lưu info
-                save_image_info(dest_folder, filename, {
-                    "filename": filename,
-                    "outcome": "fixable",
-                    "qr_detected": True,
-                    "qr_text": qr_text,
-                    "ocr_detected": ocr_ok,
-                    "ocr_texts": ocr_texts,
-                    "fixes_applied": fixes,
-                    "before_metrics": asdict(before_metrics),
-                    "after_metrics": asdict(after_metrics),
-                    "processing": "normalized"
-                })
+            # OCR (nếu bật)
+            if enable_ocr:
+                ocr_ok, ocr_texts = detect_ocr(final_image)
+                if ocr_ok:
+                    stats["ocr_success"] += 1
+                else:
+                    stats["ocr_fail"] += 1
+            
+            # Lưu ảnh
+            if enable_qr:
+                if qr_ok:
+                    dest_folder = dirs["fixable_detected"]
+                    stats["fixable_detected"] += 1
+                    status = f"🔧 FIXABLE ({', '.join(fixes)}) → QR ✓"
+                else:
+                    dest_folder = dirs["fixable_not_detected"]
+                    stats["fixable_not_detected"] += 1
+                    status = f"🔧 FIXABLE ({', '.join(fixes)}) → QR ✗"
+                if enable_ocr:
+                    status += f" | OCR {'✓' if ocr_ok else '✗'}"
             else:
-                dest_folder = dirs["fixable_not_detected"]
-                cv2.imwrite(os.path.join(dest_folder, filename), normalized)
-                stats["fixable_not_detected"] += 1
-                status = f"🔧 FIXABLE ({', '.join(fixes)}) → QR ✗ | OCR {'✓' if ocr_ok else '✗'}"
-                
-                # Lưu info - lý do không detect được
-                save_image_info(dest_folder, filename, {
-                    "filename": filename,
-                    "outcome": "fixable",
-                    "qr_detected": False,
-                    "qr_fail_reason": "QR code not found after normalization",
-                    "ocr_detected": ocr_ok,
-                    "ocr_texts": ocr_texts,
-                    "fixes_applied": fixes,
-                    "before_metrics": asdict(before_metrics),
-                    "after_metrics": asdict(after_metrics),
-                    "processing": "normalized",
-                    "possible_issues": [
-                        "QR code may be damaged or partially visible",
-                        "Image quality still insufficient after enhancement",
-                        "QR code position may be outside detection area"
-                    ]
-                })
+                dest_folder = dirs["fixable"]
+                status = f"🔧 FIXABLE ({', '.join(fixes)})"
+                if enable_normalize:
+                    status += " → Normalized"
+                if enable_ocr:
+                    status += f" | OCR {'✓' if ocr_ok else '✗'}"
+            
+            if enable_normalize:
+                cv2.imwrite(os.path.join(dest_folder, filename), final_image)
+            else:
+                shutil.copy(filepath, os.path.join(dest_folder, filename))
+            
+            # Lưu info
+            info = {
+                "filename": filename,
+                "outcome": "fixable",
+                "needs_fix": fixes,
+                "before_metrics": asdict(before_metrics),
+                "processing": "normalized" if enable_normalize else "none"
+            }
+            if enable_normalize:
+                info["after_metrics"] = asdict(after_metrics)
+            if enable_qr:
+                info["qr_detected"] = qr_ok
+                info["qr_text"] = qr_text
+            if enable_ocr:
+                info["ocr_detected"] = ocr_ok
+                info["ocr_texts"] = ocr_texts
+            save_image_info(dest_folder, filename, info)
         
         # Log
         if i <= 15 or i % 10 == 0:
@@ -536,36 +579,47 @@ def process_images(input_dir: str, output_dir: str, max_images: int = None):
         })
     
     # Summary
-    total_good = stats["good_detected"] + stats["good_not_detected"]
-    total_fixable = stats["fixable_detected"] + stats["fixable_not_detected"]
-    total_processed = total_good + total_fixable
-    total_detected = stats["good_detected"] + stats["fixable_detected"]
-    
     print("\n" + "=" * 70)
     print("📊 KẾT QUẢ")
     print("=" * 70)
     print(f"\n📋 Phân loại:")
     print(f"  ❌ DISCARD:  {stats['discard']:3d} ảnh (bỏ)")
-    print(f"  ✅ GOOD:     {total_good:3d} ảnh (không cần xử lý)")
-    print(f"  🔧 FIXABLE:  {total_fixable:3d} ảnh (đã normalize)")
+    print(f"  ✅ GOOD:     {stats['good']:3d} ảnh (không cần xử lý)")
+    print(f"  🔧 FIXABLE:  {stats['fixable']:3d} ảnh", end="")
+    if enable_normalize:
+        print(" (đã normalize)")
+    else:
+        print(" (cần xử lý)")
     
-    print(f"\n📍 QR Detection:")
-    print(f"  GOOD → Detected:         {stats['good_detected']:3d}")
-    print(f"  GOOD → Not detected:     {stats['good_not_detected']:3d}")
-    print(f"  FIXABLE → Detected:      {stats['fixable_detected']:3d}")
-    print(f"  FIXABLE → Not detected:  {stats['fixable_not_detected']:3d}")
+    if enable_qr:
+        print(f"\n📍 QR Detection:")
+        print(f"  GOOD → Detected:         {stats['good_detected']:3d}")
+        print(f"  GOOD → Not detected:     {stats['good_not_detected']:3d}")
+        print(f"  FIXABLE → Detected:      {stats['fixable_detected']:3d}")
+        print(f"  FIXABLE → Not detected:  {stats['fixable_not_detected']:3d}")
+        
+        total_processed = stats['good'] + stats['fixable']
+        total_detected = stats["good_detected"] + stats["fixable_detected"]
+        if total_processed > 0:
+            print(f"\n📈 Tỉ lệ QR Detected: {total_detected}/{total_processed} ({total_detected/total_processed*100:.1f}%)")
     
-    if total_processed > 0:
-        print(f"\n📈 Tổng:")
-        print(f"  QR Detected:  {total_detected}/{total_processed} ({total_detected/total_processed*100:.1f}%)")
-        print(f"  OCR Success:  {stats['ocr_success']}/{total_processed} ({stats['ocr_success']/total_processed*100:.1f}%)")
+    if enable_ocr:
+        total_ocr = stats['ocr_success'] + stats['ocr_fail']
+        if total_ocr > 0:
+            print(f"📈 Tỉ lệ OCR Success: {stats['ocr_success']}/{total_ocr} ({stats['ocr_success']/total_ocr*100:.1f}%)")
+    
     print("=" * 70)
     
     # Save
     summary = {
         "timestamp": datetime.now().isoformat(),
+        "options": {
+            "normalize": enable_normalize,
+            "qr": enable_qr,
+            "ocr": enable_ocr
+        },
         "filter_thresholds": FILTER_THRESHOLDS,
-        "normalize_target": NORMALIZE_TARGET,
+        "normalize_target": NORMALIZE_TARGET if enable_normalize else None,
         "stats": stats,
         "results": results
     }
@@ -577,16 +631,42 @@ def process_images(input_dir: str, output_dir: str, max_images: int = None):
 
 
 if __name__ == "__main__":
-    input_dir = "Input"
-    output_dir = "Output"
+    parser = argparse.ArgumentParser(
+        description="Filter v2: Bộ lọc chất lượng ảnh label",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Ví dụ:
+  python test_combined.py                      # Chỉ lọc
+  python test_combined.py --normalize          # Lọc + Chuẩn hóa
+  python test_combined.py --qr                 # Lọc + QR Detection
+  python test_combined.py --normalize --qr --ocr  # Đầy đủ
+        """
+    )
     
-    if len(sys.argv) > 1:
-        input_dir = sys.argv[1]
-    if len(sys.argv) > 2:
-        output_dir = sys.argv[2]
+    parser.add_argument("-i", "--input", default="Input",
+                        help="Thư mục chứa ảnh đầu vào (mặc định: Input)")
+    parser.add_argument("-o", "--output", default="Output",
+                        help="Thư mục lưu kết quả (mặc định: Output)")
+    parser.add_argument("--normalize", action="store_true",
+                        help="Bật chuẩn hóa ảnh FIXABLE")
+    parser.add_argument("--qr", action="store_true",
+                        help="Bật phát hiện QR Code")
+    parser.add_argument("--ocr", action="store_true",
+                        help="Bật nhận dạng chữ (OCR)")
+    parser.add_argument("-n", "--max-images", type=int, default=None,
+                        help="Giới hạn số ảnh xử lý")
     
-    if not os.path.exists(input_dir):
-        print(f"❌ Input directory not found: {input_dir}")
+    args = parser.parse_args()
+    
+    if not os.path.exists(args.input):
+        print(f"❌ Input directory not found: {args.input}")
         sys.exit(1)
     
-    process_images(input_dir, output_dir)
+    process_images(
+        input_dir=args.input,
+        output_dir=args.output,
+        enable_normalize=args.normalize,
+        enable_qr=args.qr,
+        enable_ocr=args.ocr,
+        max_images=args.max_images
+    )

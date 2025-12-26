@@ -85,20 +85,51 @@ Filter_v2/
 
 ### Bước 2: Chạy Script
 
+**Chỉ lọc (mặc định):**
 ```bash
 python test_combined.py
 ```
 
-**Hoặc chỉ định thư mục tùy chỉnh:**
-
+**Lọc + Chuẩn hóa ảnh FIXABLE:**
 ```bash
-python test_combined.py <input_folder> <output_folder>
+python test_combined.py --normalize
 ```
 
-Ví dụ:
+**Lọc + Phát hiện QR Code:**
 ```bash
-python test_combined.py my_images results
+python test_combined.py --qr
 ```
+
+**Lọc + OCR:**
+```bash
+python test_combined.py --ocr
+```
+
+**Đầy đủ tất cả chức năng:**
+```bash
+python test_combined.py --normalize --qr --ocr
+```
+
+**Chỉ định thư mục tùy chỉnh:**
+```bash
+python test_combined.py -i my_images -o results --normalize --qr
+```
+
+**Xem tất cả options:**
+```bash
+python test_combined.py --help
+```
+
+### Bảng Các Options
+
+| Option | Mô tả |
+|--------|-------|
+| `-i`, `--input` | Thư mục đầu vào (mặc định: `Input`) |
+| `-o`, `--output` | Thư mục đầu ra (mặc định: `Output`) |
+| `--normalize` | Bật chuẩn hóa ảnh FIXABLE |
+| `--qr` | Bật phát hiện QR Code |
+| `--ocr` | Bật nhận dạng chữ (OCR) |
+| `-n`, `--max-images` | Giới hạn số ảnh xử lý |
 
 ### Bước 3: Xem Kết Quả
 
