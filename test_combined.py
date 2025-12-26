@@ -71,8 +71,8 @@ FILTER_THRESHOLDS = {
         "fixable": {"minWidth": 200, "minHeight": 150}
     },
     "contrast": {
-        "good": 50,       # >= 50 là tốt, không cần xử lý
-        "fixable": 30     # 30-49 cần normalize
+        "good": 55,       # >= 55 là tốt, không cần xử lý
+        "fixable": 50     # >= 50 mới lấy, < 50 bị loại
     },
     "sharpness": {
         "good": 500,      # >= 500 là sắc nét
@@ -80,7 +80,7 @@ FILTER_THRESHOLDS = {
     },
     "brightness": {
         "good": {"min": 80, "max": 220},
-        "fixable": {"min": 60, "max": 240}
+        "fixable": {"min": 60, "max": 240}  # Giữ nguyên như ban đầu
     }
 }
 
